@@ -26,3 +26,24 @@ def report_save_p(report):
 
 
 print(np.sum(list(map(report_save_p, reports))))
+
+
+## Part 2 ######################################################################
+
+
+def report_almost_save_p(report):
+    ## Quadratic, but oh well.
+    return report_save_p(report) or (
+        np.any(
+            np.fromiter(
+                (
+                    report_save_p(np.concat((report[0:i], report[(i + 1) :])))
+                    for i in range(len(report))
+                ),
+                dtype=int,
+            )
+        )
+    )
+
+
+print(np.sum(list(map(report_almost_save_p, reports))))
