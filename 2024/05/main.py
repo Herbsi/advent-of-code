@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
+import copy
 import re
-from collections import deque
 
 filename = "input.txt"
 
@@ -17,6 +17,7 @@ def parse_input(filename):
 
     page_ordering_re = re.compile(r"(\d+)\|(\d+)")
     page_ordering_dict = dict()
+    valid_predecessors = dict()
 
     for rule in page_ordering_rules:
         (lhs, rhs) = tuple(map(int, page_ordering_re.match(rule).group(1, 2)))
@@ -59,3 +60,45 @@ print(sum(map(middle_page, filter(valid_update_p, updates))))
 
 
 ## Part 2 ######################################################################
+
+### Kahn's algorithm
+
+
+def order_update(update):
+    graph = dict(
+        (k, v & set(update))
+        for (k, v) in copy.deepcopy(page_ordering_dict).items()
+        if k in update
+    )
+
+    successors = set.union(
+        *[graph[page_number] for page_number in update if page_number in graph.keys()]
+    )
+
+    update_ordered = list()
+    start_nodes = set(graph.keys()) - successors
+
+    while bool(start_nodes):
+        n = start_nodes.pop()
+        update_ordered.append(n)
+        try:
+            for m in graph[n].copy():
+                graph[n] -= set([m])
+                if len([nodes for nodes in graph.values() if m in nodes]) == 0:
+                    start_nodes.add(m)
+        except KeyError:
+            continue
+
+    return update_ordered
+
+
+print(
+    sum(
+        map(
+            middle_page,
+            map(
+                order_update, filter(lambda update: not valid_update_p(update), updates)
+            ),
+        )
+    )
+)
