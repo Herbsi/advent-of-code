@@ -5,80 +5,68 @@
 
 (use-package :iter)
 
-(defun frequency (antenna)
-  (car antenna))
+
+(defstruct antenna
+  (frequency #\. :type character)
+  (x-pos 0 :type integer)
+  (y-pos 0 :type integer))
 
 
-(defun pos-x (antenna)
-  (cadr antenna))
-
-
-(defun pos-y (antenna)
-  (caddr antenna))
-
-
-(defun make-antenna (frequency pos-x pos-y)
-  (list frequency pos-x pos-y))
-
-
-(defun antinodes (antennas)
-  (flet ((antinodes-from-pair (antenna-1 antenna-2)
-           (let* ((sign-x (signum (- (pos-x antenna-2) (pos-x antenna-1))))
-                  (sign-y (signum (- (pos-y antenna-2) (pos-y antenna-1))))
-                  (delta-x (abs (- (pos-x antenna-2) (pos-x antenna-1))))
-                  (delta-y (abs (- (pos-y antenna-2) (pos-y antenna-1)))))
-             (list
-              (list
-               (+ (pos-x antenna-1) (* sign-x 2 delta-x))
-               (+ (pos-y antenna-1) (* sign-y 2 delta-y)))
-              (list
-               (- (pos-x antenna-2) (* sign-x 2 delta-x))
-               (- (pos-y antenna-2) (* sign-y 2 delta-y)))))))
-
-    (reduce #'union (remove-if (lambda (lst) (equal (car lst) (cadr lst)))
-                               (alexandria:map-product #'antinodes-from-pair antennas antennas)))))
-
-
-(defun file-line->antennas (line pos-y)
+(defun line->antennas (line y-pos)
   (iter
-    (for pos-x upfrom 0)
+    (for x-pos upfrom 0)
     (for frequency in-string line)
     (unless (char= frequency #\.)
-      (collect (make-antenna frequency pos-x pos-y)))))
+      (collect (make-antenna :frequency frequency :x-pos x-pos :y-pos y-pos)))))
 
 
 (defun lines->antennas-table (lines)
   (iter
     (with antennas-table = (make-hash-table))
-    (for pos-y upfrom 0)
+    (for y-pos upfrom 0)
     (for line in lines)
     (iter
-      (for antenna in (file-line->antennas line pos-y))
-      (setf (gethash (frequency antenna) antennas-table)
-            (union (gethash (frequency antenna) antennas-table)
+      (for antenna in (line->antennas line y-pos))
+      (setf (gethash (antenna-frequency antenna) antennas-table)
+            (union (gethash (antenna-frequency antenna) antennas-table)
                    (list antenna)
-                   :test #'equal)))
+                   :test #'equalp)))
     (finally (return antennas-table))))
 
 
-(defun valid-antinode? (antinode max-x max-y)
-  (and (<= 0 (car antinode) (1- max-x))
-       (<= 0 (cadr antinode) (1- max-y))))
+(defun antinodes (antenna-pair &optional (steps '(-1 2)))
+  (destructuring-bind (antenna-1 antenna-2) antenna-pair
+    (let ((x-sign (signum (- (antenna-x-pos antenna-2) (antenna-x-pos antenna-1))))
+          (y-sign (signum (- (antenna-y-pos antenna-2) (antenna-y-pos antenna-1))))
+          (x-delta (abs (- (antenna-x-pos antenna-2) (antenna-x-pos antenna-1))))
+          (y-delta (abs (- (antenna-y-pos antenna-2) (antenna-y-pos antenna-1)))))
+      (iter
+        (for i in steps)
+        (collect
+            (make-antenna :frequency #\#
+                          :x-pos (+ (antenna-x-pos antenna-1) (* i x-sign x-delta))
+                          :y-pos (+ (antenna-y-pos antenna-1) (* i y-sign y-delta))))))))
 
 
-(let* ((lines (uiop:read-file-lines "input.txt"))
-       (antennas-table (lines->antennas-table lines))
-       (max-y (length lines))
-       (max-x (length (car lines))))
-  (iter
-    (for (frequency antennas) in-hashtable antennas-table)
-    (unioning (antinodes antennas) into antinodes test #'equal)
+(defun main (file steps)
+  (let* ((lines (uiop:read-file-lines file))
+         (antennas-table (lines->antennas-table lines))
+         (y-max (length lines))
+         (x-max (length (car lines))))
+    (flet ((valid-antinode? (antinode)
+             (and (<= 0 (antenna-x-pos antinode) (1- x-max))
+                  (<= 0 (antenna-y-pos antinode) (1- y-max)))))
+      (iter
+        (for (nil antennas) in-hashtable antennas-table)
+        (for antennas-pairs = (remove-if (lambda (pair) (equalp (car pair) (cadr pair)))
+                                         (alexandria:map-product #'list antennas antennas)))
+        (unioning (remove-if-not #'valid-antinode? (mapcan
+                                                    (lambda (pair) (antinodes pair steps))
+                                                    antennas-pairs))
+                  into antinodes test #'equalp)
+        (finally
+         (return (length (remove-duplicates antinodes :test #'equalp))))))))
 
-    (finally
-     (return (length (remove-duplicates (remove-if-not
 
-
-                                         (lambda (antinode) (valid-antinode? antinode max-x max-y))
-                                         antinodes)
-                                        :test #'equal))))))
-                                        ; => 409 (9 bits, #x199)
+(main "input.txt" '(-1 2)) ; => 409 (9 bits, #x199)
+(main "input.txt" (alexandria:iota 101 :start -50)) ; => 1308 (11 bits, #x51C)
