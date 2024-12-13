@@ -14,74 +14,96 @@
 
 
 (defun parse-disk-map (disk-map)
-  (let ((last-file (if (oddp (length disk-map))
-                       (make-file :id (floor (/ (length disk-map) 2))
-                                  :blocks (digit-char-p (char disk-map (1- (length disk-map)))))
-                       nil)))
-    (iter:iter
-      (for id upfrom 0)
-      (collect id)
-      (for file-blocks in-string disk-map by 2)
-      (for space-blocks in-string (str:substring 1 nil disk-map) by 2)
-      (for file next (make-file :id id :blocks (digit-char-p file-blocks)))
-      (for space next (make-disk-space :blocks (digit-char-p space-blocks)))
-      (collect file into disk)
-      (collect space into disk)
-      (finally
-       (return (if last-file (append disk (list last-file)) disk))))))
+  (iter:iter
+    (with disk-map = (map 'vector #'digit-char-p disk-map))
+    (with disk = (make-hash-table))
+    (with disk-space-map = (make-hash-table))
+
+    (for file-id upfrom 0)
+    (for file-blocks in-vector disk-map by 2)
+    (for space-blocks in-vector (subseq disk-map 1) by 2)
+
+    (for file next (make-file :id file-id :blocks file-blocks))
+    (for disk-space next (make-disk-space :blocks space-blocks))
+
+    (for file-position initially 0 then (+ file-position file-blocks space-blocks))
+    (for space-position first file-blocks then (+ file-position file-blocks))
+
+    (setf (gethash file-position disk) file)
+    (collect (list file-position file) into file-queue at beginning)
+
+    (when (> space-blocks 0)
+      (setf (gethash space-position disk) disk-space)
+      (collect (list space-position disk-space) into disk-space-queue)
+      (setf (gethash space-blocks disk-space-map)
+            (append (gethash space-blocks disk-space-map) (list space-position))))
+
+    (finally
+     (let* ((blocks (aref disk-map (1- (length disk-map))))
+            (file (make-file :id file-id :blocks blocks))
+            (position (+ file-position space-blocks)))
+       (setf (gethash position disk) file)
+       (push (list position file) file-queue))
+     (return (list disk file-queue disk-space-queue disk-space-map)))))
 
 
-(defun move-block (sorted disk)
-  (let ((back (alexandria:lastcar disk)))
-    (trivia:match (list (car sorted) (car disk) back)
-      ((trivia:guard (list
-                      (file :id id-a :blocks blocks-a)
-                      (file :id id-b :blocks blocks-b)
-                      _)
-                     (= id-a id-b))
-       (list (cons (make-file :id id-a :blocks (+ blocks-a blocks-b)) (cdr sorted))
-             (cdr disk)))
-      ((trivia:guard (list _ front back)
-                     (and (file-p front) (file-p back)))
-       (list (cons front sorted) (cdr disk)))
-      ((trivia:guard (list _ front back)
-                     (and (disk-space-p front) (disk-space-p back)))
-       (list sorted (butlast disk)))
-      ((trivia:guard (list _ front back)
-                     (and (file-p front) (disk-space-p back)))
-       (list (cons front sorted) (cdr (butlast disk))))
-      ((list _ (disk-space :blocks space-blocks) (file :id id :blocks file-blocks))
-       (cond ((< file-blocks space-blocks)
-              (list
-               (cons back sorted)
-               (cons (make-disk-space :blocks (- space-blocks file-blocks)) (cdr (butlast disk)))))
-             ((= file-blocks space-blocks)
-              (list (cons back sorted) (cdr (butlast disk))))
-             ((> file-blocks space-blocks)
-              (list
-               (cons (make-file :id id :blocks space-blocks) sorted)
-               (append (cdr (butlast disk)) (list (make-file :id id :blocks (- file-blocks space-blocks)))))))))))
+(parse-disk-map (uiop:read-file-line "test.txt"))
 
 
-(defun compact (disk-map)
-  (iter
-    (for (sorted disk) initially (list nil disk-map) then (move-block sorted disk))
-    (while disk)
-    (finally (return sorted))))
+(defun move-block (disk file-queue disk-space-queue)
+  (trivia:match (list (car file-queue) (car disk-space-queue))
+    ((list (list file-position (file :id file-id :blocks file-blocks))
+           (list space-position (disk-space :blocks space-blocks)))
+     (if (< file-position space-position)
+         (progn
+           (remhash space-position disk)
+           (list disk (cdr file-queue) (cdr disk-space-queue)))
+         (progn
+           (remhash file-position disk)
+           (cond ((< file-blocks space-blocks)
+                  (let ((new-space-position (+ space-position file-blocks))
+                        (remaining-space (make-disk-space :blocks (- space-blocks file-blocks))))
+                    (setf (gethash space-position disk) (make-file :id file-id :blocks file-blocks))
+                    (setf (gethash new-space-position disk) remaining-space)
+                    (list disk
+                          (cdr file-queue)
+                          (cons (list new-space-position remaining-space) (cdr disk-space-queue)))))
+                 ((= file-blocks space-blocks)
+                  (setf (gethash space-position disk) (make-file :id file-id :blocks file-blocks))
+                  (list disk
+                        (cdr file-queue)
+                        (cdr disk-space-queue)))
+                 ((> file-blocks space-blocks)
+                  (let ((remaining-file (make-file :id file-id :blocks (- file-blocks space-blocks)))
+                        (moved-file (make-file :id file-id :blocks space-blocks)))
+                    (setf (gethash file-position disk) remaining-file)
+                    (setf (gethash space-position disk) moved-file)
+                    (list
+                     disk
+                     (cons (list file-position remaining-file) (cdr file-queue))
+                     (cdr disk-space-queue))))))))))
+
+
+(defun compact (disk file-queue disk-space-queue)
+  (labels ((rec (disk file-queue disk-space-queue)
+             (if disk-space-queue
+                 (apply #'rec (move-block disk file-queue disk-space-queue))
+                 disk)))
+    (rec disk file-queue disk-space-queue)))
 
 
 (defun checksum (disk)
   (iter
-    (for file in disk)
-    (for position initially 0 then (+ position (file-blocks file)))
-    (sum (iter
-           (for block-position from position below (+ position (file-blocks file)))
-           (sum (* (file-id file) block-position))))))
+    (for (position file) in-hashtable disk)
+    (sum (* (file-id file)
+            (file-blocks file)
+            (+ position (/ (1- (file-blocks file)) 2))))))
 
 
 (defun part-1 (filename)
-  (checksum (reverse (compact (parse-disk-map (uiop:read-file-line filename))))))
+  (destructuring-bind (disk file-queue disk-space-queue disk-space-map)
+      (parse-disk-map (uiop:read-file-line filename))
+    (checksum (compact disk file-queue disk-space-queue))))
 
 
-(part-1 "input.txt")
-                                        ; => 6607511583593 (43 bits, #x6026E617B69)
+(part-1 "input.txt") ; => 6607511583593 (43 bits, #x6026E617B69)
