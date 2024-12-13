@@ -82,3 +82,50 @@
 
 
 (part-1 "input.txt") ; => 778 (10 bits, #x30A)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defun topological-sort (graph)
+  (let ((L nil)
+        (unmarked (fset:convert 'fset:set (alexandria:hash-table-keys graph)))
+        (marked (fset:empty-set)))
+    (labels ((visit (n)
+               (unless (fset:member? n marked)
+                 (iter (for m in (gethash n graph))
+                   (visit m))
+                 (fset:adjoinf marked n)
+                 (setf unmarked (fset:less unmarked n))
+                 (push n L))))
+      (iter
+        (until (fset:empty? unmarked))
+        (for n = (fset:arb unmarked))
+        (visit n)
+        (finally (return L))))))
+
+
+(defun compute-ratings (graph)
+  (iter
+    (with sorted-vertices = (reverse (topological-sort graph)))
+    (with ratings = (make-hash-table :test #'equal))
+
+    (for v in sorted-vertices)
+
+    (setf (gethash v ratings)
+          (if (peak? v) 1
+              (iter
+                (for successor in (gethash v graph))
+                (summing (gethash successor ratings)))))
+    (finally (return ratings))))
+
+
+(defun part-2 (filename)
+  (iter
+    (with graph = (parse-topographic-map filename))
+    (with trailheads = (remove-if-not #'trailhead? (alexandria:hash-table-keys graph)))
+    (with ratings = (compute-ratings graph))
+    (for trailhead in trailheads)
+    (summing (gethash trailhead ratings))))
+
+
+(part-2 "input.txt") ; => 1925 (11 bits, #x785)
