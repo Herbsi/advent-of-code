@@ -45,37 +45,36 @@
 
 
 (defun move-block (disk file-queue disk-space-queue)
-  (trivia:match (list (car file-queue) (car disk-space-queue))
-    ((list (list file-position (file :id file-id :blocks file-blocks))
-           (list space-position (disk-space :blocks space-blocks)))
-     (if (< file-position space-position)
-         (progn
-           (remhash space-position disk)
-           (list disk (cdr file-queue) (cdr disk-space-queue)))
-         (progn
-           (remhash file-position disk)
-           (cond ((< file-blocks space-blocks)
-                  (let ((new-space-position (+ space-position file-blocks))
-                        (remaining-space (make-disk-space :blocks (- space-blocks file-blocks))))
-                    (setf (gethash space-position disk) (make-file :id file-id :blocks file-blocks))
-                    (setf (gethash new-space-position disk) remaining-space)
-                    (list disk
-                          (cdr file-queue)
-                          (cons (list new-space-position remaining-space) (cdr disk-space-queue)))))
-                 ((= file-blocks space-blocks)
-                  (setf (gethash space-position disk) (make-file :id file-id :blocks file-blocks))
-                  (list disk
-                        (cdr file-queue)
-                        (cdr disk-space-queue)))
-                 ((> file-blocks space-blocks)
-                  (let ((remaining-file (make-file :id file-id :blocks (- file-blocks space-blocks)))
-                        (moved-file (make-file :id file-id :blocks space-blocks)))
-                    (setf (gethash file-position disk) remaining-file)
-                    (setf (gethash space-position disk) moved-file)
-                    (list
-                     disk
-                     (cons (list file-position remaining-file) (cdr file-queue))
-                     (cdr disk-space-queue))))))))))
+  (trivia:let-match (((list (list file-position (file :id file-id :blocks file-blocks))
+                            (list space-position (disk-space :blocks space-blocks)))
+                      (list (car file-queue) (car disk-space-queue))))
+    (if (< file-position space-position)
+        (progn
+          (remhash space-position disk)
+          (list disk (cdr file-queue) (cdr disk-space-queue)))
+        (progn
+          (remhash file-position disk)
+          (cond ((< file-blocks space-blocks)
+                 (let ((new-space-position (+ space-position file-blocks))
+                       (remaining-space (make-disk-space :blocks (- space-blocks file-blocks))))
+                   (setf (gethash space-position disk) (make-file :id file-id :blocks file-blocks))
+                   (setf (gethash new-space-position disk) remaining-space)
+                   (list disk
+                         (cdr file-queue)
+                         (cons (list new-space-position remaining-space) (cdr disk-space-queue)))))
+                ((= file-blocks space-blocks)
+                 (setf (gethash space-position disk) (make-file :id file-id :blocks file-blocks))
+                 (list disk
+                       (cdr file-queue)
+                       (cdr disk-space-queue)))
+                ((> file-blocks space-blocks)
+                 (let ((remaining-file (make-file :id file-id :blocks (- file-blocks space-blocks)))
+                       (moved-file (make-file :id file-id :blocks space-blocks)))
+                   (setf (gethash file-position disk) remaining-file)
+                   (setf (gethash space-position disk) moved-file)
+                   (list disk
+                         (cons (list file-position remaining-file) (cdr file-queue))
+                         (cdr disk-space-queue)))))))))
 
 
 (defun compact (disk file-queue disk-space-queue)
@@ -104,16 +103,16 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defun move-block-2 (disk file-queue disk-space-queue)
-  (trivia:match (car file-queue)
-    ((list file-position (file :id file-id :blocks file-blocks))
-     (alexandria:if-let ((idx
-                          (position-if (lambda (disk-space)
-                                         (and
-                                          (< (car disk-space) file-position)
-                                          (<= file-blocks (disk-space-blocks (cadr disk-space)))))
-                                       disk-space-queue)))
-       (trivia:match (nth idx disk-space-queue)
-         ((list space-position (disk-space :blocks space-blocks))
+  (trivia:let-match (((list file-position (file :id file-id :blocks file-blocks))
+                      (car file-queue)))
+    (flet ((valid-space? (disk-space)
+             (trivia:let-match (((list space-position (disk-space :blocks space-blocks))
+                                 disk-space))
+               (and (< space-position file-position)
+                    (>= space-blocks file-blocks)))))
+      (alexandria:if-let ((idx (position-if #'valid-space? disk-space-queue)))
+        (trivia:let-match (((list space-position (disk-space :blocks space-blocks))
+                            (nth idx disk-space-queue)))
           (remhash file-position disk)
           (cond ((< file-blocks space-blocks)
                  (let ((new-space-position (+ space-position file-blocks))
@@ -130,8 +129,8 @@
                  (list disk
                        (cdr file-queue)
                        (append (subseq disk-space-queue 0 idx)
-                               (subseq disk-space-queue (1+ idx) nil)))))))
-       (list disk (cdr file-queue) disk-space-queue)))))
+                               (subseq disk-space-queue (1+ idx) nil))))))
+        (list disk (cdr file-queue) disk-space-queue)))))
 
 
 (defun compact-2 (disk file-queue disk-space-map)
@@ -144,6 +143,5 @@
 
 (defun part-2 (filename)
   (checksum (apply #'compact-2 (parse-disk-map (uiop:read-file-line filename)))))
-
 
 (part-2 "input.txt") ; => 6636608781232 (43 bits, #x60934B57BB0)
