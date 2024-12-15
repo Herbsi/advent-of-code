@@ -72,8 +72,73 @@
     (for robots
          initially (mapcar #'parse-robot (uiop:read-file-lines filename))
          then (mapcar #'move-robot robots))
+    (format t "~a~%" (length robots))
     (for i from 0 below 100)
     (finally (return (safety-factor robots)))))
 
 
 (part-1 "input.txt") ; => 232253028 (28 bits, #xDD7E664)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defun print-robots (robots)
+  (iter
+    (with robots = (sort (sort (copy-seq robots) #'< :key #'px) #'< :key #'py))
+    (with row = 0)
+    (with col = 0)
+    (for robot in robots)
+    (when (and (= row (py robot)) (= col (px robot)))
+      (format t "#")
+      (incf col))
+    (when (and (= row (py robot)) (< col (px robot)))
+      (format t "~a" (map 'string #'identity (iter (for i from col below (px robot)) (collect #\.))))
+      (format t "#")
+      (setf col (1+ (px robot))))
+    (when (< row (py robot))
+      (format t "~a~%" (map 'string #'identity (iter (for i from col below *width*) (collect #\.))))
+      (iter (for i from row below (py robot))
+        (format t "~a~%" (map 'string #'identity (iter (for i from 0 below *width*) (collect #\.)))))
+      (setf row (py robot))
+      (setf col (px robot))
+      (format t "~a" (map 'string #'identity (iter (for i from 0 below col) (collect #\.))))
+      (format t "#")
+      (incf col))
+    (when (= col *width*)
+      (format t "~%")
+      (setf col 0)
+      (incf row))
+    (finally (format t "~a~%" (map 'string #'identity (iter (for i from col below *width*) (collect #\.))))
+             (iter
+               (for row below *height*)
+               (format t "~a~%" (map 'string #'identity (iter (for i from 0 below *width*) (collect #\.))))))))
+
+
+(defun variance (robots)
+  (let ((mean-x (/ (apply #'+ (mapcar #'px robots)) (length robots)))
+        (mean-y (/ (apply #'+  (mapcar #'py robots)) (length robots)))
+        (x2 (/ (apply #'+  (mapcar (lambda (x) (* x x)) (mapcar #'px robots))) (length robots)))
+        (y2 (/ (apply #'+  (mapcar (lambda (y) (* y y)) (mapcar #'py robots))) (length robots))))
+    (+ (- x2 (* mean-x mean-x))
+       (- y2 (* mean-x mean-y)))))
+
+
+(defun part-2 (filename)
+  (with-open-file (*standard-output* "output.txt"
+                                     :direction :output
+                                     :if-exists :supersede)
+    (iter
+      (for robots
+           initially (mapcar #'parse-robot (uiop:read-file-lines filename))
+           then (mapcar #'move-robot robots))
+      (for second from 0 below (* *width* *height*))
+      (for metric = (variance robots))
+      (format t "Second ~a ~a~%" second metric)
+      (print-robots robots)
+      (format t "~%")
+      (minimize metric into optimised-metric)
+      (finally (return optimised-metric)))))
+
+
+(part-2 "input.txt") ; => 12783441/125000 (102.267525)
+                                        ; occurs at 8179
