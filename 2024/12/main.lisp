@@ -1,8 +1,8 @@
-(ql:quickload :alexandria)
-(ql:quickload :fset)
-(ql:quickload :iterate)
-(ql:quickload :str)
-(ql:quickload :trivia)
+(ql:quickload :alexandria :silent t)
+(ql:quickload :fset :silent t)
+(ql:quickload :iterate :silent t)
+(ql:quickload :str :silent t)
+(ql:quickload :trivia :silent t)
 
 (use-package :iter)
 
@@ -81,3 +81,64 @@
 
 
 (part-1 "input.txt") ; => 1473276 (21 bits, #x167AFC)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defun corners (garden i j)
+  (labels ((same-plant? (plant) (char= plant (aref garden i j)))
+           (neighbours (i j)
+             (iter outer
+               (with (rows columns) = (array-dimensions garden))
+               (for delta-i from -1 to +1)
+               (iter
+                 (for delta-j from -1 to +1)
+                 (when (and (zerop delta-i) (zerop delta-j))
+                   (next-iteration))
+                 (for next-i = (+ i delta-i))
+                 (for next-j = (+ j delta-j))
+                 (for neighbour =
+                      (if (and (<= 0 next-i (1- rows))
+                               (<= 0 next-j  (1- columns))
+                               (same-plant? (aref garden next-i next-j)))
+                          (aref garden next-i next-j)
+                          #\*))
+                 (if (zerop (* delta-i delta-j))
+                     (in outer (collect neighbour into adjacent))
+                     (in outer (collect neighbour into diagonal))))
+               (finally (return-from outer (list adjacent diagonal))))))
+    ;; Adjacent / Diagonal
+    ;; 1 1 2
+    ;; 2 # 3
+    ;; 3 4 4
+    (trivia:match (neighbours i j)
+      ((list (list #\* #\* #\* #\*) _) 4)
+      ((trivia:guard (list adjacent _)
+                     (= 1 (count-if #'same-plant? adjacent)))
+       2)
+      ((or
+        (list (list a (equal a) #\* #\*) (list x _ _ _))
+        (list (list a #\* (equal a) #\*) (list _ x _ _))
+        (list (list #\* a #\* (equal a)) (list _ _ x _))
+        (list (list #\* #\* a (equal a)) (list _ _ _ x)))
+       (- 2 (if (same-plant? x) 1 0)))
+      ((or
+        (list (list a (equal a) (equal a) #\*) (list x y _ _))
+        (list (list a (equal a) #\* (equal a)) (list x _ y _))
+        (list (list a #\* (equal a) (equal a)) (list _ x _ y))
+        (list (list #\* a (equal a) (equal a)) (list _ _ x y)))
+       (- 2 (count-if #'same-plant? `(,x ,y))))
+      ((trivia:guard (list adjacent diagonal)
+                     (= 4 (count-if #'same-plant? adjacent)))
+       (- 4 (count-if #'same-plant? diagonal)))
+      (_ 0))))
+
+
+(defun part-2 (filename)
+  (destructuring-bind (garden graph) (parse-garden filename)
+    (iter
+      (for (root component) in-hashtable (connected-components graph))
+      (for corners = (lambda (ij) (apply #'corners garden ij)))
+      (summing (* (length component) (reduce #'+ (mapcar corners component)))))))
+
+
+(part-2 "input.txt") ; => 901100 (20 bits, #xDBFEC)
